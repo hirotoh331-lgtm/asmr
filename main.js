@@ -3,10 +3,12 @@ const audioElement = document.getElementById('audio-player');
 const toggleBtn = document.getElementById('toggle-mode');
 const statusText = document.getElementById('status');
 const earRadios = document.querySelectorAll('input[name="target-ear"]');
-const sensitivityRadios = document.querySelectorAll('input[name="sensitivity"]');
+const sensitivitySlider = document.getElementById('sensitivity-slider');
+const sensitivityVal = document.getElementById('sensitivity-val');
 
 const dbLElement = document.getElementById('db-l');
 const dbRElement = document.getElementById('db-r');
+const dbDiffElement = document.getElementById('db-diff');
 const stateElement = document.getElementById('current-state');
 
 let audioCtx = null;
@@ -14,21 +16,16 @@ let workletNode = null;
 let sourceNode = null;
 let currentMode = "off";
 let targetEar = 'right';
-let sensitivity = 'medium';
+let sensitivity = 50; // スライダー初期値
 
 async function initAudio() {
   if (audioCtx) return;
   
   try {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    
-    // Workletの読み込み（※Live Server環境でないとここでエラーになります）
     await audioCtx.audioWorklet.addModule('processor.js');
     
-    // source → workletNode → destination の接続
     sourceNode = audioCtx.createMediaElementSource(audioElement);
-    
-    // 出力が確実にステレオ(2ch)になるようオプションを指定
     workletNode = new AudioWorkletNode(audioCtx, 'mono-asmr-processor', {
       outputChannelCount: [2]
     });
@@ -46,7 +43,7 @@ async function initAudio() {
 
   } catch (error) {
     console.error("Audio initialization error:", error);
-    alert("音声処理エンジンの起動に失敗しました。\nVS Codeの「Live Server」拡張機能を使用してブラウザで開いているか確認してください。");
+    alert("音声処理エンジンの起動に失敗しました。\nVS Codeの「Live Server」拡張機能等を使用してブラウザで開いているか確認してください。");
   }
 }
 
@@ -56,7 +53,7 @@ function sendConfigToWorklet() {
       type: 'config',
       mode: currentMode,
       targetEar: targetEar,
-      sensitivity: sensitivity
+      sensitivity: Number(sensitivity)
     });
   }
 }
@@ -65,6 +62,15 @@ function updateDebugUI(data) {
   dbLElement.textContent = data.dbL.toFixed(1) + ' dB';
   dbRElement.textContent = data.dbR.toFixed(1) + ' dB';
 
+  // 音量差の計算と表示
+  const diff = Math.abs(data.dbL - data.dbR);
+  let diffText = diff.toFixed(1) + ' dB ';
+  if (data.dbL > data.dbR + 0.1) diffText += '(L > R)';
+  else if (data.dbR > data.dbL + 0.1) diffText += '(R > L)';
+  else diffText += '(均等)';
+  dbDiffElement.textContent = diffText;
+
+  // 状態の更新
   if (data.mode === "off") {
     stateElement.textContent = '通常再生 (OFF)';
     stateElement.className = 'status-normal';
@@ -97,11 +103,11 @@ earRadios.forEach(radio => {
   });
 });
 
-sensitivityRadios.forEach(radio => {
-  radio.addEventListener('change', (e) => {
-    sensitivity = e.target.value;
-    sendConfigToWorklet();
-  });
+// スライダーの入力イベント
+sensitivitySlider.addEventListener('input', (e) => {
+  sensitivity = e.target.value;
+  sensitivityVal.textContent = sensitivity;
+  sendConfigToWorklet();
 });
 
 toggleBtn.addEventListener('change', async (e) => {
@@ -116,7 +122,6 @@ toggleBtn.addEventListener('change', async (e) => {
   sendConfigToWorklet();
 });
 
-// 再生ボタン押下時にも確実にAudioContextをresumeさせる
 audioElement.addEventListener('play', async () => {
   if (!audioCtx) await initAudio();
   if (audioCtx && audioCtx.state === 'suspended') {

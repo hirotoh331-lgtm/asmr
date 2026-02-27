@@ -13,14 +13,17 @@ class MonoAsmrProcessor extends AudioWorkletProcessor {
 
     this.mode = "off"; 
     this.targetEar = 'right';
+    this.sensitivityVal = 50;
 
-    this.setSensitivity('medium');
+    this.updateParameters();
 
     this.port.onmessage = (e) => {
       if (e.data.type === 'config') {
         this.mode = e.data.mode;
         this.targetEar = e.data.targetEar;
-        this.setSensitivity(e.data.sensitivity);
+        this.sensitivityVal = e.data.sensitivity;
+        
+        this.updateParameters();
 
         if (this.mode === "off") {
           this.state = 0; 
@@ -31,30 +34,17 @@ class MonoAsmrProcessor extends AudioWorkletProcessor {
     };
   }
 
-  setSensitivity(level) {
-    let thresholdDbOn, thresholdDbOff, fadeTimeSec;
+  updateParameters() {
+    // 0〜100 を -60dB 〜 -20dB の「音量差の閾値」にマッピング
+    // 0(鈍感): ターゲット側が-60dB以上小さくならないと発動しない
+    // 100(敏感): ターゲット側が-20dB小さくなっただけで発動する
+    this.thresholdDiffOn = -60 + (this.sensitivityVal / 100) * 40;
+    
+    // オフになる閾値（ヒステリシスを設けてチャタリング防止）
+    this.thresholdDiffOff = this.thresholdDiffOn + 5; 
 
-    switch (level) {
-      case 'low':
-        thresholdDbOn = -45;
-        thresholdDbOff = -40;
-        fadeTimeSec = 0.02;
-        break;
-      case 'high':
-        thresholdDbOn = -25;
-        thresholdDbOff = -20;
-        fadeTimeSec = 0.3;
-        break;
-      case 'medium':
-      default:
-        thresholdDbOn = -35;
-        thresholdDbOff = -30;
-        fadeTimeSec = 0.1;
-        break;
-    }
-
-    this.thresholdOn = Math.pow(10, thresholdDbOn / 20);
-    this.thresholdOff = Math.pow(10, thresholdDbOff / 20);
+    // フェード時間を 250ms (0.25秒) に延長
+    const fadeTimeSec = 0.25;
     this.alpha = Math.exp(-1 / (sampleRate * fadeTimeSec));
   }
 
@@ -62,16 +52,13 @@ class MonoAsmrProcessor extends AudioWorkletProcessor {
     const input = inputs[0];
     const output = outputs[0];
 
-    // 入力データ自体がない場合はスキップ
     if (!input || input.length === 0) return true;
 
-    // モノラル（1ch）入力の場合は、左の音を右にもコピーして処理を続行する
     const inL = input[0];
     const inR = input.length > 1 ? input[1] : input[0];
     const outL = output[0];
     const outR = output.length > 1 ? output[1] : output[0];
 
-    // 安全対策
     if (!inL || !outL) return true;
 
     for (let i = 0; i < inL.length; i++) {
@@ -118,24 +105,31 @@ class MonoAsmrProcessor extends AudioWorkletProcessor {
       this.targetMix = [1, 0, 0, 1];
       this.state = 0;
     } else if (this.mode === "on") {
+      
+      // ターゲット耳 - ソース耳 の音量差を計算 (ターゲットが小さいほどマイナスが大きくなる)
+      const diffDbRightTarget = dbR - dbL; 
+      const diffDbLeftTarget = dbL - dbR;  
+
+      // ノイズによる誤動作を防ぐため、ソース側に一定以上の音量（-80dB）があることも条件とする
       if (this.targetEar === 'right') {
         if (this.state === 0) {
-          if (rmsR < this.thresholdOn && rmsL >= this.thresholdOn) {
+          if (diffDbRightTarget < this.thresholdDiffOn && dbL > -80) {
             this.state = 1; 
           }
         } else if (this.state === 1) {
-          if (rmsR >= this.thresholdOff || rmsL < this.thresholdOn) {
+          if (diffDbRightTarget >= this.thresholdDiffOff || dbL <= -80) {
             this.state = 0;
           }
         }
         this.targetMix = (this.state === 0) ? [1, 0, 0, 1] : [1, 0, 1, 0];
+        
       } else if (this.targetEar === 'left') {
         if (this.state === 0) {
-          if (rmsL < this.thresholdOn && rmsR >= this.thresholdOn) {
+          if (diffDbLeftTarget < this.thresholdDiffOn && dbR > -80) {
             this.state = 1;
           }
         } else if (this.state === 1) {
-          if (rmsL >= this.thresholdOff || rmsR < this.thresholdOn) {
+          if (diffDbLeftTarget >= this.thresholdDiffOff || dbR <= -80) {
             this.state = 0;
           }
         }
