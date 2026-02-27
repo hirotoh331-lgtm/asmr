@@ -47,14 +47,14 @@
     </div>
 
     <div class="control-group">
-      <label>補完の感度 (左右の音量差判定):</label>
+      <label>補完の感度 (左右の音量差しきい値):</label>
       <div class="slider-wrapper">
-        <span style="font-size:0.8em;">鈍感(0)</span>
-        <input type="range" id="sensitivity-slider" min="0" max="100" value="50">
-        <span style="font-size:0.8em;">敏感(100)</span>
-        <span id="sensitivity-val" style="font-weight:bold; min-width:30px; text-align:right;">50</span>
+        <span style="font-size:0.8em;">鈍感(3.0dB差)</span>
+        <input type="range" id="sensitivity-slider" min="0" max="100" value="80">
+        <span style="font-size:0.8em;">敏感(0.2dB差)</span>
+        <span id="sensitivity-val" style="font-weight:bold; min-width:30px; text-align:right;">80</span>
       </div>
-      <p style="font-size: 0.8em; color: #666; margin-top: 5px;">※数値が高いほど、わずかな音量差でも補完が作動します。</p>
+      <p style="font-size: 0.8em; color: #666; margin-top: 5px;">※数値が高いほど、微小な音量差(0.x dB)で補完が作動します。</p>
     </div>
 
     <div class="control-group">

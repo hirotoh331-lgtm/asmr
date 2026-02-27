@@ -16,7 +16,7 @@ let workletNode = null;
 let sourceNode = null;
 let currentMode = "off";
 let targetEar = 'right';
-let sensitivity = 50; // スライダー初期値
+let sensitivity = 80; // 初期値をより敏感な数値に設定
 
 async function initAudio() {
   if (audioCtx) return;
@@ -43,7 +43,7 @@ async function initAudio() {
 
   } catch (error) {
     console.error("Audio initialization error:", error);
-    alert("音声処理エンジンの起動に失敗しました。\nVS Codeの「Live Server」拡張機能等を使用してブラウザで開いているか確認してください。");
+    alert("音声処理エンジンの起動に失敗しました。\nVS Codeの「Live Server」やGitHub Pages等で開いているか確認してください。");
   }
 }
 
@@ -62,15 +62,12 @@ function updateDebugUI(data) {
   dbLElement.textContent = data.dbL.toFixed(1) + ' dB';
   dbRElement.textContent = data.dbR.toFixed(1) + ' dB';
 
-  // 音量差の計算と表示
-  const diff = Math.abs(data.dbL - data.dbR);
-  let diffText = diff.toFixed(1) + ' dB ';
+  let diffText = data.diff.toFixed(1) + ' dB ';
   if (data.dbL > data.dbR + 0.1) diffText += '(L > R)';
   else if (data.dbR > data.dbL + 0.1) diffText += '(R > L)';
   else diffText += '(均等)';
   dbDiffElement.textContent = diffText;
 
-  // 状態の更新
   if (data.mode === "off") {
     stateElement.textContent = '通常再生 (OFF)';
     stateElement.className = 'status-normal';
@@ -103,7 +100,6 @@ earRadios.forEach(radio => {
   });
 });
 
-// スライダーの入力イベント
 sensitivitySlider.addEventListener('input', (e) => {
   sensitivity = e.target.value;
   sensitivityVal.textContent = sensitivity;

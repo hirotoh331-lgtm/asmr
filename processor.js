@@ -1,7 +1,7 @@
 class MonoAsmrProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.frameSize = Math.floor(sampleRate * 0.05);
+    this.frameSize = Math.floor(sampleRate * 0.05); // 約50msごとの解析
     
     this.bufferL = new Float32Array(this.frameSize);
     this.bufferR = new Float32Array(this.frameSize);
@@ -13,7 +13,12 @@ class MonoAsmrProcessor extends AudioWorkletProcessor {
 
     this.mode = "off"; 
     this.targetEar = 'right';
-    this.sensitivityVal = 50;
+    this.sensitivityVal = 80;
+
+    // 安定化のための連続フレームカウンタ
+    this.framesMetOn = 0;
+    this.framesMetOff = 0;
+    this.REQUIRED_FRAMES = 3; // 約150ms連続で条件を満たした場合に発動/解除
 
     this.updateParameters();
 
@@ -29,23 +34,32 @@ class MonoAsmrProcessor extends AudioWorkletProcessor {
           this.state = 0; 
           this.targetMix = [1, 0, 0, 1];
           this.currentMix = [1, 0, 0, 1];
+          this.framesMetOn = 0;
+          this.framesMetOff = 0;
         }
       }
     };
   }
 
   updateParameters() {
-    // 0〜100 を -60dB 〜 -20dB の「音量差の閾値」にマッピング
-    // 0(鈍感): ターゲット側が-60dB以上小さくならないと発動しない
-    // 100(敏感): ターゲット側が-20dB小さくなっただけで発動する
-    this.thresholdDiffOn = -60 + (this.sensitivityVal / 100) * 40;
+    // 0(鈍感) = 3.0dB差, 100(敏感) = 0.2dB差 にマッピング
+    this.thresholdOn = 3.0 - (this.sensitivityVal / 100) * 2.8;
     
-    // オフになる閾値（ヒステリシスを設けてチャタリング防止）
-    this.thresholdDiffOff = this.thresholdDiffOn + 5; 
+    // ヒステリシス: オンになる閾値より 0.2dB 小さくなったらオフにする (チャタリング防止)
+    this.thresholdOff = Math.max(0.05, this.thresholdOn - 0.2); 
 
-    // フェード時間を 250ms (0.25秒) に延長
     const fadeTimeSec = 0.25;
     this.alpha = Math.exp(-1 / (sampleRate * fadeTimeSec));
+  }
+
+  // 判定用シグナルへの軽いコンプレッション (突発的なピークを抑えて判定を安定させる)
+  compressForAnalysis(db) {
+    const threshold = -35; 
+    const ratio = 1.5; 
+    if (db > threshold) {
+      return threshold + (db - threshold) / ratio;
+    }
+    return db;
   }
 
   process(inputs, outputs, parameters) {
@@ -98,49 +112,73 @@ class MonoAsmrProcessor extends AudioWorkletProcessor {
     const rmsL = Math.sqrt(sumL / this.frameSize);
     const rmsR = Math.sqrt(sumR / this.frameSize);
 
-    const dbL = rmsL > 0.00001 ? 20 * Math.log10(rmsL) : -100;
-    const dbR = rmsR > 0.00001 ? 20 * Math.log10(rmsR) : -100;
+    // 生のdB値
+    const rawDbL = rmsL > 0.00001 ? 20 * Math.log10(rmsL) : -100;
+    const rawDbR = rmsR > 0.00001 ? 20 * Math.log10(rmsR) : -100;
+
+    // 判定用にコンプレッションを適用したdB値
+    const compDbL = this.compressForAnalysis(rawDbL);
+    const compDbR = this.compressForAnalysis(rawDbR);
 
     if (this.mode === "off") {
       this.targetMix = [1, 0, 0, 1];
       this.state = 0;
     } else if (this.mode === "on") {
       
-      // ターゲット耳 - ソース耳 の音量差を計算 (ターゲットが小さいほどマイナスが大きくなる)
-      const diffDbRightTarget = dbR - dbL; 
-      const diffDbLeftTarget = dbL - dbR;  
-
-      // ノイズによる誤動作を防ぐため、ソース側に一定以上の音量（-80dB）があることも条件とする
+      let sourceDb, targetDb;
       if (this.targetEar === 'right') {
-        if (this.state === 0) {
-          if (diffDbRightTarget < this.thresholdDiffOn && dbL > -80) {
-            this.state = 1; 
-          }
-        } else if (this.state === 1) {
-          if (diffDbRightTarget >= this.thresholdDiffOff || dbL <= -80) {
-            this.state = 0;
-          }
-        }
-        this.targetMix = (this.state === 0) ? [1, 0, 0, 1] : [1, 0, 1, 0];
-        
-      } else if (this.targetEar === 'left') {
-        if (this.state === 0) {
-          if (diffDbLeftTarget < this.thresholdDiffOn && dbR > -80) {
+        sourceDb = compDbL; // 健常な耳（音源）
+        targetDb = compDbR; // 聞こえにくい耳（補完先）
+      } else {
+        sourceDb = compDbR;
+        targetDb = compDbL;
+      }
+
+      // 「健常な耳」に対して「聞こえにくい耳」がどれだけ小さいか（dB差）
+      const diffDb = sourceDb - targetDb; 
+
+      // 誤動作防止の足切り（ソース側が-80dB以下の完全無音の場合は動作しない）
+      const minSourceDb = -80;
+
+      if (this.state === 0) {
+        // ONになる条件：ターゲット側が指定値(0.2〜3.0dB)以上小さく、かつ音源が存在する
+        if (diffDb >= this.thresholdOn && sourceDb > minSourceDb) {
+          this.framesMetOn++;
+          this.framesMetOff = 0;
+          if (this.framesMetOn >= this.REQUIRED_FRAMES) {
             this.state = 1;
+            this.framesMetOn = 0; // リセット
           }
-        } else if (this.state === 1) {
-          if (diffDbLeftTarget >= this.thresholdDiffOff || dbR <= -80) {
-            this.state = 0;
-          }
+        } else {
+          this.framesMetOn = 0;
         }
+      } else if (this.state === 1) {
+        // OFFになる条件：差がヒステリシス閾値を下回る、または音が無くなった
+        if (diffDb < this.thresholdOff || sourceDb <= minSourceDb) {
+          this.framesMetOff++;
+          this.framesMetOn = 0;
+          if (this.framesMetOff >= this.REQUIRED_FRAMES) {
+            this.state = 0;
+            this.framesMetOff = 0; // リセット
+          }
+        } else {
+          this.framesMetOff = 0;
+        }
+      }
+
+      if (this.targetEar === 'right') {
+        this.targetMix = (this.state === 0) ? [1, 0, 0, 1] : [1, 0, 1, 0];
+      } else {
         this.targetMix = (this.state === 0) ? [1, 0, 0, 1] : [0, 1, 0, 1];
       }
     }
 
+    // メインスレッドには「生のdB値」と「生の差分」を送って正確な数値を表示させる
     this.port.postMessage({
       type: 'debug',
-      dbL: dbL,
-      dbR: dbR,
+      dbL: rawDbL,
+      dbR: rawDbR,
+      diff: Math.abs(rawDbL - rawDbR),
       state: this.state,
       targetEar: this.targetEar,
       mode: this.mode
