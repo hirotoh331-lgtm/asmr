@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>片耳ASMRプレイヤー</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 500px; margin: auto; }
+    .card { background: #f9f9f9; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .control-group { margin-bottom: 20px; }
+    .radio-group { margin-top: 5px; display: flex; gap: 15px; }
+    audio { width: 100%; margin-top: 10px; }
+    .switch-wrapper { display: flex; align-items: center; gap: 10px; font-weight: bold; }
+    
+    .debug-panel { 
+      background: #222; 
+      color: #0f0; 
+      padding: 15px; 
+      border-radius: 5px; 
+      font-family: monospace;
+      margin-top: 20px;
+    }
+    .debug-panel h3 { margin: 0 0 10px 0; font-size: 1.1em; color: #fff; }
+    .debug-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+    .status-normal { color: #aaa; }
+    .status-active { color: #ffeb3b; font-weight: bold; background: #555; padding: 2px 5px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>片耳ASMRプレイヤー 🎧</h2>
+    
+    <div class="control-group">
+      <label>音声ファイルを選択:</label><br>
+      <input type="file" id="audio-file" accept="audio/*">
+    </div>
+
+    <div class="control-group">
+      <label>聞く耳の設定:</label>
+      <div class="radio-group">
+        <label><input type="radio" name="target-ear" value="right" checked> 右耳</label>
+        <label><input type="radio" name="target-ear" value="left"> 左耳</label>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <label>補完の感度 (ASMRの音量に合わせて調整):</label>
+      <div class="radio-group">
+        <label><input type="radio" name="sensitivity" value="low"> 低</label>
+        <label><input type="radio" name="sensitivity" value="medium" checked> 中</label>
+        <label><input type="radio" name="sensitivity" value="high"> 高</label>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <div class="switch-wrapper">
+        <input type="checkbox" id="toggle-mode">
+        <label for="toggle-mode">片耳モード: <span id="status">OFF</span></label>
+      </div>
+      <p style="font-size: 0.85em; color: #666;">※ONにすると、選択した耳側が無音になった際に反対側の音声を補完します。</p>
+    </div>
+
+    <audio id="audio-player" controls crossorigin="anonymous"></audio>
+
+    <div class="debug-panel">
+      <h3>デバッグ情報</h3>
+      <div class="debug-row">
+        <span>左チャンネル音量:</span>
+        <span id="db-l">-∞ dB</span>
+      </div>
+      <div class="debug-row">
+        <span>右チャンネル音量:</span>
+        <span id="db-r">-∞ dB</span>
+      </div>
+      <div class="debug-row" style="margin-top: 10px; border-top: 1px solid #444; padding-top: 10px;">
+        <span>現在の状態:</span>
+        <span id="current-state" class="status-normal">通常再生 (OFF)</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>
